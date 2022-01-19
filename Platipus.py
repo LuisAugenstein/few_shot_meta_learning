@@ -213,8 +213,8 @@ class Platipus(object):
                                     model=model
                                 )
 
-                                tb_writer.add_scalar(tag="Val_NLL", scalar_value=np.mean(loss_temp), global_step=global_step)
-                                tb_writer.add_scalar(tag="Val_Accuracy", scalar_value=np.mean(accuracy_temp), global_step=global_step)
+                                # tb_writer.add_scalar(tag="Val_NLL", scalar_value=np.mean(loss_temp), global_step=global_step)
+                                # tb_writer.add_scalar(tag="Val_Accuracy", scalar_value=np.mean(accuracy_temp), global_step=global_step)
 
                                 del loss_temp
                                 del accuracy_temp
@@ -230,7 +230,8 @@ class Platipus(object):
 
             print("Training is completed.")
         finally:
-            print("\nClose tensorboard summary writer")
+            pass
+            # print("\nClose tensorboard summary writer")
             # tb_writer.close()
 
         return None
