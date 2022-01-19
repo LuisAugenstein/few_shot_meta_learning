@@ -10,6 +10,7 @@ import os
 import random
 import typing
 
+import wandb
 
 from few_shot_meta_learning.HyperNetClasses import PlatipusNet
 from few_shot_meta_learning.Maml import Maml
@@ -17,8 +18,20 @@ from few_shot_meta_learning._utils import kl_divergence_gaussians
 
 class Platipus(object):
     def __init__(self, config: dict) -> None:
-        self.config = config
+        if (config['wandb']):
+            wandb.init(project="fsml_" + config['algorithm'],
+                       entity="seminar-meta-learning",
+                       config=config)
+            wandb.define_metric(name="meta_train/epoch")
+            wandb.define_metric(name="meta_train/*",
+                        step_metric="meta_train/epoch")
 
+            wandb.define_metric(name="adapt/epoch")
+            wandb.define_metric(name="adapt/*", step_metric="adapt/epoch")
+
+            wandb.define_metric(name="results/sample")
+            wandb.define_metric(name="results/*", step_metric="results/sample")
+        self.config = config
         self.hyper_net_class = PlatipusNet
 
     def load_model(self, resume_epoch: int, eps_dataloader: torch.utils.data.DataLoader, **kwargs) -> dict:

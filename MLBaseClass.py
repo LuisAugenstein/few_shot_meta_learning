@@ -11,6 +11,8 @@ import sys
 
 import abc
 
+import wandb
+
 # --------------------------------------------------
 # Default configuration
 # --------------------------------------------------
@@ -72,6 +74,19 @@ class MLBaseClass(object):
     def __init__(self, config: dict = config) -> None:
         """Initialize an instance of a meta-learning algorithm
         """
+        if (config['wandb']):
+            wandb.init(project="fsml_" + config['algorithm'],
+                       entity="seminar-meta-learning",
+                       config=config)
+            wandb.define_metric(name="meta_train/epoch")
+            wandb.define_metric(name="meta_train/*",
+                        step_metric="meta_train/epoch")
+
+            wandb.define_metric(name="adapt/epoch")
+            wandb.define_metric(name="adapt/*", step_metric="adapt/epoch")
+
+            wandb.define_metric(name="results/sample")
+            wandb.define_metric(name="results/*", step_metric="results/sample")
         self.config = config
         return
     
@@ -194,13 +209,17 @@ class MLBaseClass(object):
                         model["optimizer"].zero_grad()
 
                         # monitoring
-                        if (eps_count + 1) % self.config['minibatch_print'] == 0:
+                        if self.config['wandb'] and (eps_count + 1) % self.config['minibatch_print'] == 0:
                             loss_monitor = loss_monitor * self.config["minibatch"] / self.config["minibatch_print"]
 
                             # calculate step for Tensorboard Summary Writer
                             global_step = (epoch_id * self.config['num_episodes_per_epoch'] + eps_count + 1) // self.config['minibatch_print']
 
                             # tb_writer.add_scalar(tag="Train_Loss", scalar_value=loss_monitor, global_step=global_step)
+                            wandb.log({
+                                'meta_train/epoch': global_step,
+                                'meta_train/train_loss': loss_monitor
+                            })
 
                             # reset monitoring variables
                             loss_monitor = 0.
@@ -217,6 +236,10 @@ class MLBaseClass(object):
                                     eps_dataloader=val_dataloader,
                                     model=model
                                 )
+
+                                wandb.log({
+                                    'meta_train/val_loss': np.mean(loss_temp)
+                                })
 
                                 # tb_writer.add_scalar(tag="Val_NLL", scalar_value=np.mean(loss_temp), global_step=global_step)
                                 # tb_writer.add_scalar(tag="Val_Accuracy", scalar_value=np.mean(accuracy_temp), global_step=global_step)
