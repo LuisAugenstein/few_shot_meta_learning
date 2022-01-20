@@ -287,7 +287,7 @@ class Platipus(object):
                     epoch_id+1, loss_train, loss_val))
                 # save model
                 self.saveModel(model, epoch_id+1)
-            print("Training is completed.")
+            print("Training is completed.\n")
         finally:
             pass
             # print("\nClose tensorboard summary writer")
