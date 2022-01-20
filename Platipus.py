@@ -16,6 +16,7 @@ from few_shot_meta_learning.HyperNetClasses import PlatipusNet
 from few_shot_meta_learning.Maml import Maml
 from few_shot_meta_learning._utils import kl_divergence_gaussians
 
+
 class Platipus(object):
     def __init__(self, config: dict) -> None:
         if (config['wandb']):
@@ -24,7 +25,7 @@ class Platipus(object):
                        config=config)
             wandb.define_metric(name="meta_train/epoch")
             wandb.define_metric(name="meta_train/*",
-                        step_metric="meta_train/epoch")
+                                step_metric="meta_train/epoch")
 
             wandb.define_metric(name="adapt/epoch")
             wandb.define_metric(name="adapt/*", step_metric="adapt/epoch")
@@ -37,16 +38,23 @@ class Platipus(object):
     def load_model(self, resume_epoch: int, eps_dataloader: torch.utils.data.DataLoader, **kwargs) -> dict:
         maml_temp = Maml(config=self.config)
         return maml_temp.load_model(resume_epoch=resume_epoch, eps_dataloader=eps_dataloader, **kwargs)
-    
+
     def adapt_params(self, x: torch.Tensor, y: torch.Tensor, params: typing.List[torch.Tensor], lr: torch.Tensor, model: dict) -> typing.List[torch.Tensor]:
         q_params = [p + 0. for p in params]
-        
-        for _ in range(self.config["num_inner_updates"]):
+
+        for i in range(self.config["num_inner_updates"]):
             # predict output logits
             logits = model["f_base_net"].forward(x, params=q_params)
 
             # calculate classification loss
             loss = self.config['loss_function'](input=logits, target=y)
+
+            # log adaptation
+            if self.config['num_inner_updates'] > 500 and ((i+1) % 500 == 0 or i == 0):
+                if i == 0:
+                    print(' ')
+                print('Epoch {:<5} {:<10}'.format(
+                    i+1, np.round(loss.item(), 4)))
 
             if self.config["first_order"]:
                 grads = torch.autograd.grad(
@@ -61,11 +69,13 @@ class Platipus(object):
                     create_graph=True
                 )
 
-            for i in range(len(q_params)):
-                q_params[i] = q_params[i] - lr * grads[i]
-        
+            for j in range(len(q_params)):
+                #q_params[j] = q_params[j] - lr * grads[j]
+                q_params[j] = q_params[j] - lr * \
+                    torch.clamp(grads[j], min=-0.5, max=0.5)
+
         return q_params
-    
+
     def adaptation(self, x: torch.Tensor, y: torch.Tensor, model: dict) -> typing.List[typing.List[torch.Tensor]]:
         """Correspond to Algorithm 2 for testing
         """
@@ -76,30 +86,35 @@ class Platipus(object):
         params_dict = model["hyper_net"].forward()
 
         # step 1 - prior distribution
-        mu_theta_t = self.adapt_params(x=x, y=y, params=params_dict["mu_theta"], lr=params_dict["gamma_p"], model=model)
+        mu_theta_t = self.adapt_params(
+            x=x, y=y, params=params_dict["mu_theta"], lr=params_dict["gamma_p"], model=model)
 
         for model_id in range(self.config["num_models"]):
             # sample theta
             theta = [None] * len(params_dict["mu_theta"])
             for i in range(len(theta)):
-                theta[i] = mu_theta_t[i] + torch.randn_like(input=mu_theta_t[i], device=mu_theta_t[i].device) * torch.exp(input=params_dict["log_sigma_theta"][i])
-            
-            phi[model_id] = self.adapt_params(x=x, y=y, params=theta, lr=self.config["inner_lr"], model=model)
+                theta[i] = mu_theta_t[i] + torch.randn_like(
+                    input=mu_theta_t[i], device=mu_theta_t[i].device) * torch.exp(input=params_dict["log_sigma_theta"][i])
+
+            phi[model_id] = self.adapt_params(
+                x=x, y=y, params=theta, lr=self.config["inner_lr"], model=model)
 
         return phi
 
     def prediction(self, x: torch.Tensor, phi: typing.List[typing.List[torch.Tensor]], model: dict) -> typing.List[torch.Tensor]:
         logits = [None] * self.config["num_models"]
         for model_id in range(self.config["num_models"]):
-            logits[model_id] = model["f_base_net"].forward(x, params=phi[model_id])
+            logits[model_id] = model["f_base_net"].forward(
+                x, params=phi[model_id])
 
         return logits
-    
+
     def validation_loss(self, x_t: torch.Tensor, y_t: torch.Tensor, x_v: torch.Tensor, y_v: torch.Tensor, model: dict) -> torch.Tensor:
         params_dict = model["hyper_net"].forward()
 
         # adapt mu_theta - step 7 in PLATIPUS paper
-        mu_theta_v = self.adapt_params(x=x_v, y=y_v, params=params_dict["mu_theta"], lr=params_dict["gamma_q"], model=model)
+        mu_theta_v = self.adapt_params(
+            x=x_v, y=y_v, params=params_dict["mu_theta"], lr=params_dict["gamma_q"], model=model)
 
         phi = [None] * self.config["num_models"]
         for model_id in range(self.config["num_models"]):
@@ -107,13 +122,16 @@ class Platipus(object):
             theta = [None] * len(params_dict["mu_theta"])
             for i in range(len(theta)):
                 theta[i] = mu_theta_v[i] + \
-                    torch.randn_like(input=mu_theta_v[i], device=mu_theta_v[i].device) * torch.exp(input=params_dict["log_v_q"][i])
-            
+                    torch.randn_like(
+                        input=mu_theta_v[i], device=mu_theta_v[i].device) * torch.exp(input=params_dict["log_v_q"][i])
+
             # steps 8 and 9
-            phi[model_id] = self.adapt_params(x=x_t, y=y_t, params=theta, lr=self.config["inner_lr"], model=model)
+            phi[model_id] = self.adapt_params(
+                x=x_t, y=y_t, params=theta, lr=self.config["inner_lr"], model=model)
 
         # step 10 - adapt mu_theta to training subset
-        mu_theta_t = self.adapt_params(x=x_t, y=y_t, params=params_dict["mu_theta"], lr=params_dict["gamma_p"], model=model)
+        mu_theta_t = self.adapt_params(
+            x=x_t, y=y_t, params=params_dict["mu_theta"], lr=params_dict["gamma_p"], model=model)
 
         # step 11 - validation loss
         loss = 0
@@ -121,16 +139,17 @@ class Platipus(object):
             logits = model["f_base_net"].forward(x_v, params=phi[i])
             loss_temp = self.config['loss_function'](input=logits, target=y_v)
             loss = loss + loss_temp
-        
+
         loss = loss / len(phi)
 
         # KL loss
-        KL_loss = kl_divergence_gaussians(p=[*mu_theta_v, *params_dict["log_v_q"]], q=[*mu_theta_t, *params_dict["log_sigma_theta"]])
+        KL_loss = kl_divergence_gaussians(
+            p=[*mu_theta_v, *params_dict["log_v_q"]], q=[*mu_theta_t, *params_dict["log_sigma_theta"]])
 
         loss = loss + self.config["KL_weight"] * KL_loss
 
         return loss
-    
+
     def evaluation(self, x_t: torch.Tensor, y_t: torch.Tensor, x_v: torch.Tensor, y_v: torch.Tensor, model: dict) -> typing.Tuple[float, float]:
         phi = self.adaptation(x=x_t, y=y_t, model=model)
 
@@ -139,14 +158,15 @@ class Platipus(object):
         # classification loss
         loss = 0
         for logits_ in logits:
-            loss = loss + self.config['loss_function'](input=logits_, target=y_v)
-        
+            loss = loss + \
+                self.config['loss_function'](input=logits_, target=y_v)
+
         loss = loss / len(logits)
 
         y_pred = 0
         for logits_ in logits:
             y_pred = y_pred + torch.softmax(input=logits_, dim=1)
-        
+
         y_pred = y_pred / len(logits)
 
         accuracy = (y_pred.argmax(dim=1) == y_v).float().mean().item()
@@ -156,11 +176,19 @@ class Platipus(object):
     def train(self, train_dataloader: torch.utils.data.DataLoader, val_dataloader: torch.utils.data.DataLoader, **kwargs) -> None:
         """Train meta-learning model
         """
-        print("Training is started.\nLog is stored at {0:s}.\n".format(self.config["logdir"]))
+        print("Training is started.")
+        print(f"Models are stored at {self.config['logdir']}.\n")
+
+        print("{:<7} {:<10} {:<10}".format(
+            'Epoch', 'NLL_train', 'NLL_validation'))
 
         # initialize/load model. Please see the load_model method implemented in each specific class for further information about the model
-        model = self.load_model(resume_epoch=self.config["resume_epoch"], hyper_net_class=self.hyper_net_class, eps_dataloader=train_dataloader)
+        model = self.load_model(
+            resume_epoch=self.config["resume_epoch"], hyper_net_class=self.hyper_net_class, eps_dataloader=train_dataloader)
         model["optimizer"].zero_grad()
+
+        # store initial model
+        self.saveModel(model, 0.1)
 
         # initialize a tensorboard summary writer for logging
         # tb_writer = SummaryWriter(
@@ -176,7 +204,8 @@ class Platipus(object):
                         break
 
                     # split data into train and validation
-                    split_data = self.config['train_val_split_function'](eps_data=eps_data, k_shot=self.config['k_shot'])
+                    split_data = self.config['train_val_split_function'](
+                        eps_data=eps_data, k_shot=self.config['k_shot'])
 
                     # move data to GPU (if there is a GPU)
                     x_t = split_data['x_t'].to(self.config['device'])
@@ -187,7 +216,8 @@ class Platipus(object):
                     # -------------------------
                     # loss on validation subset
                     # -------------------------
-                    loss_v = self.validation_loss(x_t=x_t, y_t=y_t, x_v=x_v, y_v=y_v, model=model)
+                    loss_v = self.validation_loss(
+                        x_t=x_t, y_t=y_t, x_v=x_v, y_v=y_v, model=model)
                     loss_v = loss_v / self.config["minibatch"]
 
                     if torch.isnan(input=loss_v):
@@ -205,13 +235,23 @@ class Platipus(object):
                         model["optimizer"].zero_grad()
 
                         # monitoring
-                        if (eps_count + 1) % self.config["minibatch_print"] == 0:
-                            loss_monitor = loss_monitor * self.config["minibatch"] / self.config["minibatch_print"]
+                        if (eps_count + 1) % self.config['minibatch_print'] == 0 or \
+                           (epoch_id == 0 and (eps_count+1) / self.config['minibatch'] == 0):
+                            loss_monitor = loss_monitor * \
+                                self.config["minibatch"] / \
+                                self.config["minibatch_print"]
 
                             # calculate step for Tensorboard Summary Writer
-                            global_step = (epoch_id * self.config["num_episodes_per_epoch"] + eps_count + 1) // self.config["minibatch_print"]
+                            global_step = (
+                                epoch_id * self.config["num_episodes_per_epoch"] + eps_count + 1) // self.config["minibatch_print"]
 
                             # tb_writer.add_scalar(tag="Train_Loss", scalar_value=loss_monitor, global_step=global_step)
+                            if self.config['wandb']:
+                                wandb.log({
+                                    'meta_train/epoch': global_step,
+                                    'meta_train/train_loss': loss_monitor
+                                })
+                            loss_train = np.round(loss_monitor, 4)
 
                             # reset monitoring variables
                             loss_monitor = 0.
@@ -219,35 +259,51 @@ class Platipus(object):
                             # -------------------------
                             # Validation
                             # -------------------------
-                            if val_dataloader is not None:
+                            loss_val = '-'
+                            if val_dataloader.dataset.n_tasks != 0:
                                 loss_temp, accuracy_temp = self.evaluate(
                                     num_eps=self.config['num_episodes'],
                                     eps_dataloader=val_dataloader,
                                     model=model
                                 )
 
+                                loss_val = np.mean(loss_temp)
+                                if self.config['wandb']:
+                                    wandb.log({
+                                        'meta_train/val_loss': loss_val
+                                    })
+                                loss_val = np.round(loss_val, 4)
+
                                 # tb_writer.add_scalar(tag="Val_NLL", scalar_value=np.mean(loss_temp), global_step=global_step)
                                 # tb_writer.add_scalar(tag="Val_Accuracy", scalar_value=np.mean(accuracy_temp), global_step=global_step)
 
                                 del loss_temp
                                 del accuracy_temp
-
+                            if epoch_id == 0 and (eps_count + 1) / self.config['minibatch_print'] == 1:
+                                print("{:<7} {:<10} {:<10}".format(
+                                    0.1, loss_train, loss_val))
+                # print on console
+                print("{:<7} {:<10} {:<10}".format(
+                    epoch_id+1, loss_train, loss_val))
                 # save model
-                checkpoint = {
-                    "hyper_net_state_dict": model["hyper_net"].state_dict(),
-                    "opt_state_dict": model["optimizer"].state_dict()
-                }
-                checkpoint_path = os.path.join(self.config["logdir"], "Epoch_{0:d}.pt".format(epoch_id + 1))
-                torch.save(obj=checkpoint, f=checkpoint_path)
-                print("State dictionaries are saved into {0:s}\n".format(checkpoint_path))
-
+                self.saveModel(model, epoch_id+1)
             print("Training is completed.")
         finally:
             pass
             # print("\nClose tensorboard summary writer")
             # tb_writer.close()
-
         return None
+
+    def saveModel(self, model: dict, epoch_id: typing.Union[int, float]):
+        checkpoint = {
+            "hyper_net_state_dict": model["hyper_net"].state_dict(),
+            "opt_state_dict": model["optimizer"].state_dict()
+        }
+        checkpoint_path = os.path.join(
+            self.config['logdir'], f'Epoch_{epoch_id}.pt')
+        torch.save(obj=checkpoint, f=checkpoint_path)
+        # print('State dictionaries are saved into {0:s}\n'.format(
+        #     checkpoint_path))
 
     def evaluate(self, num_eps: int, eps_dataloader: torch.utils.data.DataLoader, model: dict) -> typing.Tuple[typing.List[float], typing.List[float]]:
         """Calculate loss and accuracy of tasks contained in the list "eps"
@@ -267,7 +323,8 @@ class Platipus(object):
                 break
 
             # split data into train and validation
-            split_data = self.config['train_val_split_function'](eps_data=eps_data, k_shot=self.config['k_shot'])
+            split_data = self.config['train_val_split_function'](
+                eps_data=eps_data, k_shot=self.config['k_shot'])
 
             # move data to GPU (if there is a GPU)
             x_t = split_data['x_t'].to(self.config['device'])
@@ -275,10 +332,10 @@ class Platipus(object):
             x_v = split_data['x_v'].to(self.config['device'])
             y_v = split_data['y_v'].to(self.config['device'])
 
-            loss[eps_id], accuracy[eps_id] = self.evaluation(x_t=x_t, y_t=y_t, x_v=x_v, y_v=y_v, model=model)
+            loss[eps_id], accuracy[eps_id] = self.evaluation(
+                x_t=x_t, y_t=y_t, x_v=x_v, y_v=y_v, model=model)
 
         return loss, accuracy
-            
 
     # def test(self, num_eps: int, eps_dataloader: torch.utils.data.DataLoader) -> None:
     #     """Evaluate the performance

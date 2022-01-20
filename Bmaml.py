@@ -27,15 +27,18 @@ class Bmaml(MLBaseClass):
 
         q_params = torch.stack(tensors=[p for p in model["hyper_net"].parameters()])
 
-        for _ in range(self.config["num_inner_updates"]):
+        for i in range(self.config["num_inner_updates"]):
             distance_NLL = torch.empty(size=(self.config["num_models"], model["hyper_net"].num_base_params), device=self.config["device"])
 
+            loss_monitor = 0
             for particle_id in range(self.config["num_models"]):
                 base_net_params = f_hyper_net.forward(i=particle_id)
                 
                 logits = model["f_base_net"].forward(x, params=base_net_params)
 
                 loss_temp = self.config['loss_function'](input=logits, target=y)
+
+                loss_monitor += loss_temp.item() / self.config['num_models']
 
                 if self.config["first_order"]:
                     grads = torch.autograd.grad(
@@ -51,6 +54,12 @@ class Bmaml(MLBaseClass):
                     )
                 
                 distance_NLL[particle_id, :] = torch.nn.utils.parameters_to_vector(parameters=grads)
+            
+            # log adaptation
+            if self.config['num_inner_updates'] > 500 and ((i+1) % 500 == 0 or i==0):
+                if i==0:
+                    print(' ')
+                print('Epoch {:<5} {:<10}'.format(i+1, np.round(loss_monitor, 4)))
 
             kernel_matrix, grad_kernel, _ = self.get_kernel(params=q_params)
 

@@ -2,6 +2,7 @@ import torch
 import higher
 import typing
 import os
+import numpy as np
 
 from few_shot_meta_learning.MLBaseClass import MLBaseClass
 from few_shot_meta_learning.HyperNetClasses import IdentityNet
@@ -69,7 +70,7 @@ class Maml(MLBaseClass):
             break
 
         params = torch.nn.utils.parameters_to_vector(parameters=base_net.parameters())
-        print('Number of parameters of the base network = {0:,}.\n'.format(params.numel()))
+        # print('Number of parameters of the base network = {0:,}.\n'.format(params.numel()))
 
         model["hyper_net"] = kwargs["hyper_net_class"](base_net=base_net, num_models=self.config["num_models"])
 
@@ -92,7 +93,7 @@ class Maml(MLBaseClass):
         # load model if there is saved file
         if resume_epoch > 0:
             # path to the saved file
-            checkpoint_path = os.path.join(self.config['logdir'], 'Epoch_{0:d}.pt'.format(resume_epoch))
+            checkpoint_path = os.path.join(self.config['logdir'], f'Epoch_{resume_epoch}.pt')
             
             # load file
             saved_checkpoint = torch.load(
@@ -121,7 +122,7 @@ class Maml(MLBaseClass):
             track_higher_grads=self.config["train_flag"]
         )
 
-        for _ in range(self.config['num_inner_updates']):
+        for i in range(self.config['num_inner_updates']):
             q_params = f_hyper_net.fast_params # parameters of the task-specific hyper_net
 
             # generate task-specific parameter
@@ -132,6 +133,12 @@ class Maml(MLBaseClass):
 
             # calculate classification loss
             loss = self.config['loss_function'](input=logits, target=y)
+
+            # log adaptation
+            if self.config['num_inner_updates'] > 500 and ((i+1) % 500 == 0 or i==0):
+                if i==0:
+                    print(' ')
+                print('Epoch {:<5} {:<10}'.format(i+1, np.round(loss.item(), 4)))
 
             if self.config['first_order']:
                 grads = torch.autograd.grad(
