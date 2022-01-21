@@ -34,9 +34,10 @@ class Maml(MLBaseClass):
             resume_epoch = self.config['resume_epoch']
 
         if self.config['network_architecture'] == 'FcNet':
+            layers = [self.config['hidden_size']] * self.config['num_hidden']
             base_net = FcNet(
                 dim_output=self.config['num_ways'],
-                num_hidden_units=(40, 40)
+                num_hidden_units=layers
             )
         elif self.config['network_architecture'] == 'CNN':
             base_net = CNN(
