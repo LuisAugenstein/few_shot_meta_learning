@@ -12,7 +12,7 @@ import sys
 import abc
 
 import wandb
-
+from tqdm import tqdm
 # --------------------------------------------------
 # Default configuration
 # --------------------------------------------------
@@ -184,8 +184,10 @@ class MLBaseClass(object):
         try:
             for epoch_id in range(self.config['resume_epoch'], self.config['resume_epoch'] + self.config['num_epochs'], 1):
                 loss_monitor = 0.
-                for eps_count, eps_data in enumerate(train_dataloader):
-
+                progress = tqdm(enumerate(train_dataloader))
+                for eps_count, eps_data in progress:
+                    #print(f"EPOCH: {epoch_id}, EPS Count: {eps_count}")
+                    #print(f"eps_data: {eps_data[1].shape}")
                     if (eps_count >= self.config['num_episodes_per_epoch']):
                         break
 
@@ -219,10 +221,8 @@ class MLBaseClass(object):
                     loss_v.backward()
 
                     loss_monitor += loss_v.item()
-
                     # update meta-parameters
                     if ((eps_count + 1) % self.config['minibatch'] == 0):
-
                         model["optimizer"].step()
                         model["optimizer"].zero_grad()
 
@@ -245,6 +245,8 @@ class MLBaseClass(object):
                                 })
                             loss_train = np.round(loss_monitor, 4)
 
+                            progress.set_description(f"Episode loss {loss_train}")
+
                             # reset monitoring variables
                             loss_monitor = 0.
 
@@ -265,6 +267,7 @@ class MLBaseClass(object):
                                 loss_val = np.mean(loss_temp)
                                 if self.config['wandb']:
                                     wandb.log({
+                                        'meta_train/epoch': global_step,
                                         'meta_train/val_loss': loss_val
                                     })
                                 loss_val = np.round(loss_val, 4)
@@ -275,12 +278,11 @@ class MLBaseClass(object):
                                 model["f_base_net"].train()
                                 del loss_temp
                                 del accuracy_temp
-                            if epoch_id == 0 and (eps_count + 1) / self.config['minibatch_print'] == 1:
-                                print("{:<7} {:<10} {:<10}".format(
-                                    0.1, loss_train, loss_val))
+
                 # print on console
-                print("{:<7} {:<10} {:<10}".format(
-                    epoch_id+1, loss_train, loss_val))
+                print("Episode {:<3}: Validation Loss = {:<10}".format(
+                    epoch_id+1, loss_monitor))
+
                 # save model
                 self.saveModel(model, epoch_id+1)
             print('Training is completed.\n')
