@@ -10,6 +10,8 @@ import os
 import random
 import typing
 
+from tqdm import tqdm
+
 import wandb
 
 from few_shot_meta_learning.HyperNetClasses import PlatipusNet
@@ -199,7 +201,8 @@ class Platipus(object):
         try:
             for epoch_id in range(self.config["resume_epoch"], self.config["resume_epoch"] + self.config["num_epochs"], 1):
                 loss_monitor = 0.
-                for eps_count, eps_data in enumerate(train_dataloader):
+                progress = tqdm(enumerate(train_dataloader))
+                for eps_count, eps_data in progress:
                     if (eps_count >= self.config['num_episodes_per_epoch']):
                         break
 
@@ -253,6 +256,8 @@ class Platipus(object):
                                 })
                             loss_train = np.round(loss_monitor, 4)
 
+                            progress.set_description(f"Episode loss {loss_train}")
+
                             # reset monitoring variables
                             loss_monitor = 0.
 
@@ -279,12 +284,11 @@ class Platipus(object):
 
                                 del loss_temp
                                 del accuracy_temp
-                            if epoch_id == 0 and (eps_count + 1) / self.config['minibatch_print'] == 1:
-                                print("{:<7} {:<10} {:<10}".format(
-                                    0.1, loss_train, loss_val))
+
                 # print on console
-                print("{:<7} {:<10} {:<10}".format(
-                    epoch_id+1, loss_train, loss_val))
+                print("Episode {:<3}: Validation Loss = {:<10}".format(
+                    epoch_id+1, loss_monitor))
+
                 # save model
                 self.saveModel(model, epoch_id+1)
             print("Training is completed.\n")
