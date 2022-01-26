@@ -164,8 +164,11 @@ class MLBaseClass(object):
         print("Training is started.")
         print(f"Models are stored at {self.config['logdir']}.\n")
 
-        print("{:<7} {:<10} {:<10}".format(
-            'Epoch', 'NLL_train', 'NLL_validation'))
+        print("{:<10}: train loss for the current minibatch".format('NLL_train'))
+        print("{:<10}: val loss for all tasks in the validation set\n".format('NLL_val'))
+
+        print("{:<6} {:<10} {:<10} {:<10}".format(
+            'Epoch', 'Minibatch', 'NLL_train', 'NLL_val'))
 
         # initialize/load model. Please see the load_model method implemented in each specific class for further information about the model
         model = self.load_model(
@@ -227,8 +230,7 @@ class MLBaseClass(object):
                         model["optimizer"].zero_grad()
 
                         # monitoring
-                        if (eps_count + 1) % self.config['minibatch_print'] == 0 or \
-                           (epoch_id == 0 and (eps_count+1) / self.config['minibatch'] == 0):
+                        if (eps_count + 1) % self.config['minibatch_print'] == 0:
                             loss_monitor = loss_monitor * \
                                 self.config["minibatch"] / \
                                 self.config["minibatch_print"]
@@ -244,16 +246,12 @@ class MLBaseClass(object):
                                     'meta_train/train_loss': loss_monitor
                                 })
                             loss_train = np.round(loss_monitor, 4)
-
-                            progress.set_description(f"Episode loss {loss_train}")
-
                             # reset monitoring variables
                             loss_monitor = 0.
 
                             # -------------------------
                             # Validation
                             # -------------------------
-                            loss_val = '-'
                             if val_dataloader is not None and val_dataloader.dataset.n_tasks != 0:
                                 # turn on EVAL mode to disable dropout
                                 model["f_base_net"].eval()
@@ -267,24 +265,24 @@ class MLBaseClass(object):
                                 loss_val = np.mean(loss_temp)
                                 if self.config['wandb']:
                                     wandb.log({
-                                        'meta_train/epoch': global_step,
                                         'meta_train/val_loss': loss_val
                                     })
                                 loss_val = np.round(loss_val, 4)
-
                                 # tb_writer.add_scalar(tag="Val_NLL", scalar_value=np.mean(loss_temp), global_step=global_step)
                                 # tb_writer.add_scalar(tag="Val_Accuracy", scalar_value=np.mean(accuracy_temp), global_step=global_step)
-
                                 model["f_base_net"].train()
                                 del loss_temp
                                 del accuracy_temp
+                            # plot train and val loss with tqdm
+                            minibatch_number = (
+                                eps_count + 1) // self.config["minibatch_print"]
+                            loss_string = "{:<6} {:<10} {:<10} {:<10}".format(
+                                epoch_id+1, minibatch_number, loss_train, loss_val)
+                            progress.set_description(loss_string)
 
-                # print on console
-                print("Episode {:<3}: Validation Loss = {:<10}".format(
-                    epoch_id+1, loss_monitor))
-
-                # save model
-                self.saveModel(model, epoch_id+1)
+                if (epoch_id + 1) % self.config['epochs_to_save'] == 0:
+                    # save model
+                    self.saveModel(model, epoch_id+1)
             print('Training is completed.\n')
         finally:
             pass
