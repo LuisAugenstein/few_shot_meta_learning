@@ -252,6 +252,7 @@ class MLBaseClass(object):
                             # -------------------------
                             # Validation
                             # -------------------------
+                            loss_val = 0
                             if val_dataloader is not None and val_dataloader.dataset.n_tasks != 0:
                                 # turn on EVAL mode to disable dropout
                                 model["f_base_net"].eval()

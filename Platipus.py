@@ -264,6 +264,7 @@ class Platipus(object):
                             # -------------------------
                             # Validation
                             # -------------------------
+                            loss_val = 0
                             if val_dataloader is not None and val_dataloader.dataset.n_tasks != 0:
                                 loss_temp, accuracy_temp = self.evaluate(
                                     num_eps=self.config['num_episodes'],
