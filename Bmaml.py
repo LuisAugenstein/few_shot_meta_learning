@@ -63,7 +63,7 @@ class Bmaml(MLBaseClass):
 
             kernel_matrix, grad_kernel, _ = self.get_kernel(params=q_params)
 
-            q_params = q_params - self.config["inner_lr"] * (torch.matmul(kernel_matrix, distance_NLL) - grad_kernel)
+            q_params = q_params - self.config["inner_lr"] * torch.clamp(torch.matmul(kernel_matrix, distance_NLL) - grad_kernel, min=-0.5, max=0.5)
 
             # update hyper-net
             f_hyper_net.update_params(params=[q_params[i, :] for i in range(self.config["num_models"])])
